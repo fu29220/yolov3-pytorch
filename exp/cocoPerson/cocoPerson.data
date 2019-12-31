@@ -1,0 +1,4 @@
+classes= 1
+train=../exp/cocoPerson/train/train.json
+valid=../exp/cocoPerson/val/val.json
+names=../exp/cocoPerson/classes.names
