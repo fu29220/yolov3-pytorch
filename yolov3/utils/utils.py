@@ -449,68 +449,7 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5):
     return output
 
 
-
-
-#  def build_targets(pred_boxes, pred_cls, target, anchors, ignore_thres):
-
-    #  ByteTensor = torch.cuda.ByteTensor if pred_boxes.is_cuda else torch.ByteTensor
-    #  FloatTensor = torch.cuda.FloatTensor if pred_boxes.is_cuda else torch.FloatTensor
-
-    #  nB = pred_boxes.size(0)
-    #  nA = pred_boxes.size(1)
-    #  nC = pred_cls.size(-1)
-    #  nG = pred_boxes.size(2)
-
-    #  # Output tensors
-    #  obj_mask = ByteTensor(nB, nA, nG, nG).fill_(0)
-    #  noobj_mask = ByteTensor(nB, nA, nG, nG).fill_(1)
-    #  class_mask = FloatTensor(nB, nA, nG, nG).fill_(0)
-    #  iou_scores = FloatTensor(nB, nA, nG, nG).fill_(0)
-    #  tx = FloatTensor(nB, nA, nG, nG).fill_(0)
-    #  ty = FloatTensor(nB, nA, nG, nG).fill_(0)
-    #  tw = FloatTensor(nB, nA, nG, nG).fill_(0)
-    #  th = FloatTensor(nB, nA, nG, nG).fill_(0)
-    #  tcls = FloatTensor(nB, nA, nG, nG, nC).fill_(0)
-
-    #  # Convert to position relative to box
-    #  target_boxes = target[:, 2:6] * nG
-    #  gxy = target_boxes[:, :2]
-    #  gwh = target_boxes[:, 2:]
-    #  # Get anchors with best iou
-    #  ious = torch.stack([bbox_wh_iou(anchor, gwh) for anchor in anchors])
-    #  best_ious, best_n = ious.max(0)
-    #  # Separate target values
-    #  b, target_labels = target[:, :2].long().t()
-    #  gx, gy = gxy.t()
-    #  gw, gh = gwh.t()
-    #  gi, gj = gxy.long().t()
-    #  # Set masks
-    #  obj_mask[b, best_n, gj, gi] = 1
-    #  noobj_mask[b, best_n, gj, gi] = 0
-
-    #  # Set noobj mask to zero where iou exceeds ignore threshold
-    #  for i, anchor_ious in enumerate(ious.t()):
-        #  noobj_mask[b[i], anchor_ious > ignore_thres, gj[i], gi[i]] = 0
-
-    #  # Coordinates
-    #  tx[b, best_n, gj, gi] = gx - gx.floor()
-    #  ty[b, best_n, gj, gi] = gy - gy.floor()
-    #  # Width and height
-    #  tw[b, best_n, gj, gi] = torch.log(gw / anchors[best_n][:, 0] + 1e-16)
-    #  th[b, best_n, gj, gi] = torch.log(gh / anchors[best_n][:, 1] + 1e-16)
-    #  # One-hot encoding of label
-    #  tcls[b, best_n, gj, gi, target_labels] = 1
-    #  # Compute label correctness and iou at best anchor
-    #  class_mask[b, best_n, gj, gi] = (pred_cls[b, best_n, gj, gi].argmax(-1) == target_labels).float()
-    #  iou_scores[b, best_n, gj, gi] = bbox_iou(pred_boxes[b, best_n, gj, gi], target_boxes, x1y1x2y2=False)
-
-    #  tconf = obj_mask.float()
-    #  return iou_scores, class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, tconf
-
 def build_targets(target_boxes, anchors, grid_size):
-    #ByteTensor = torch.cuda.ByteTensor if pred_boxes.is_cuda else torch.ByteTensor # 8-bit unsigned tensor
-    #FloatTensor = torch.cuda.FloatTensor if pred_boxes.is_cuda else torch.FloatTensor
-
 
     # target shape: [image_index, class, center-x, center-y, w, h] (normalized)
     target = target_boxes.clone()
@@ -528,9 +467,6 @@ def build_targets(target_boxes, anchors, grid_size):
     ious = ious.view(-1)
 
 
-    # img_idx: index of gt-box
-    # box_cls: class of box_cls
-    # img_idx, box_cls, gx, gy, gw, gh = target.repeat([nA,1]).long().t()
     target = target.repeat([nA,1]).t()
 
     reject=True
@@ -540,16 +476,7 @@ def build_targets(target_boxes, anchors, grid_size):
         target = target[:, idx]
         anchor_idx = anchor_idx[idx]
         ious = ious[idx]
-        #b, best_n, gw, gh, gx, gy, target_labels, best_ious=b[idx], best_n[idx], gw[idx], gh[idx], gx[idx], gy[idx], target_labels[idx], best_ious[idx]
 
-
-    # note: need modify batch-index: batch-index = batch-index % imgs_per_gpu
-    #b = b % 8
-    #b -= b.min()
-
-    #gw, gh = gwh.t()
-    #gi, gj = gxy.long().t() # get (gx, gy) int indice (convert float to integer)
-    #gi, gj = gx.long(), gy.long() # get (gx, gy) int indice (convert float to integer)
     gi, gj = target[2:4].long()
 
     # note: gt box may cross the boundary
@@ -558,48 +485,13 @@ def build_targets(target_boxes, anchors, grid_size):
     gi[gi > grid_size - 1] = grid_size - 1
     gj[gj > grid_size - 1] = grid_size - 1
 
-    # according to gt indice, set mask
-    #obj_mask[b, best_n, gj, gi] = 1
-    #noobj_mask[b, best_n, gj, gi] = 0
-
-    # set noobj mask to 0(has-obj) where iou > ignore_threshold
-    #for i, anchor_ious in enumerate(best_ious):
-        # ious.t() shape: [number of gt boxes, 3]
-        # i: 0, 1, 2 ...
-        # anchor_ious: tensor(iou1, iou2, iou3)
-        #if anchor_ious > ignore_thres:
-           # noobj_mask[b[i], best_n[i], gj[i], gi[i]] = 0 # i is index
-        #noobj_mask[b[i], (anchor_ious > ignore_thres).nonzero(), gj[i], gi[i]] = 0 # i is index
-                                                                       # b[i]: get batch_size index of gt box i
-                                                                       # note: can decrease negative samples, when the anchor matched gt box 
-                                                                       # IOU > 0.5, it is neither positive samples nor negative samples
-
-
 
     # calculate target offsets
-
     target[2] -= target[2].floor()
     target[3] -= target[3].floor()
     target[4]=torch.log(target[4]/anchors[anchor_idx][:, 0] + 1e-16)
     target[5]=torch.log(target[5]/anchors[anchor_idx][:, 1] + 1e-16)
 
-    #target = torch.cat([target, anchor_idx, gi, gj])
-
-    
-    #tx[b, best_n, gj, gi] = gx - gx.floor()
-    #ty[b, best_n, gj, gi] = gy - gy.floor()
-    #tw[b, best_n, gj, gi] = torch.log(gw / anchors[best_n][:, 0] + 1e-16)
-    #th[b, best_n, gj, gi] = torch.log(gh / anchors[best_n][:, 1] + 1e-16)
-    # one-hot encoding of label
-    #tcls[b, best_n, gj, gi, target_labels] = 1
-    # compute label correctness
-    #class_mask[b, best_n, gj, gi] = (pred_cls[b, best_n, gj, gi].argmax(-1) == target_labels).float()
-    # calculate iou scores
-    #iou_scores[b, best_n, gj, gi] = bbox_iou(pred_boxes[b, best_n, gj, gi], target_boxes, x1y1x2y2=False)
-
-    # tconf
-    #tconf = obj_mask.float()
-    #return class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, tconf
     return target[2:], target[1].long(), target[0].long(), anchor_idx.long(), gi, gj
 
 
@@ -623,87 +515,24 @@ def compute_loss(model, targets, outputs, img_dim):
     :returns: TODO
 
     """
-    #ft = torch.cuda.FloatTensor
-    #cls_pw, obj_pw, red = 1.0, 1.0, 'mean'
-    #BCEcls = nn.BCEWithLogitsLoss(pos_weight=ft([cls_pw]), reduction=red)
-    #BCEobj = nn.BCEWithLogitsLoss(pos_weight=ft([obj_pw]), reduction=red)
-    #BCE = nn.BCEWithLogitsLoss()
-    #CE = nn.CrossEntropyLoss()
-    #num_out = len(model.yolo_layers)
-    #l = outputs.size(1) // num_out # len_out 
     total_loss = []
-    #print("**********outputs",outputs[2][0,0,0,0,:10])
     for i, output in enumerate(outputs):
         yolo_layer = model.yolo_layers[i]
         pred_box = output[..., :4]
         pred_conf = output[..., 4]
         pred_cls = output[..., 5:]
-        #  pred_boxes, pred_conf, pred_cls = output
-        #scaled_anchors, anchor_w, anchor_h, grid_x, grid_y = compute_grid_offsets(img_dim, pred_boxes.size(2), yolo_layer.anchors)
+
         grid_size = pred_box.size(2)
         scaled_anchors = torch.cuda.FloatTensor(yolo_layer.anchors)*grid_size/img_dim
 
-
-        #x = pred_boxes[..., 0]
-        #y = pred_boxes[..., 1]
-        #w = pred_boxes[..., 2]
-        #h = pred_boxes[..., 3]
-
-        #  pred_boxes[..., 0] += grid_x
-        #  pred_boxes[..., 1] += grid_y
-        #  pred_boxes[..., 2] = torch.exp(w) * anchor_w
-        #  pred_boxes[..., 3] = torch.exp(h) * anchor_h
-
-        #pred_boxes_ = torch.cuda.FloatTensor(pred_boxes.shape) 
-        #pred_boxes_[..., 0] = x.data + grid_x.data
-        #pred_boxes_[..., 1] = y.data + grid_y.data
-        #pred_boxes_[..., 2] = torch.exp(w.data) * anchor_w
-        #pred_boxes_[..., 3] = torch.exp(h.data) * anchor_h
-
-
-        #print("*******shape_box", pred_boxes.shape)
-        #print("*******shape_cls", pred_cls.shape)
-        #print("*******shape_conf", pred_conf.shape)
-        #print("*******gride_size", grid_x, grid_y)
-
-        #  pred_boxes = outputs[:, l*i:l*i+4, :][..., 0:4].view(yolo_layer.shape_box)
-        #  pred_cls = outputs[:, l*i:l*i+4, :][..., 5:].view(yolo_layer.shape_cls)
-        #  pred_conf = outputs[:, l*i:l*i+4, :][..., 4].view(yolo_layer.shape_conf)
-
-        #  class_mask, obj_mask, noobj_mask, tx, ty, tw, th, tcls, tconf = build_targets(
-                #  pred_boxes=pred_boxes_,
-                #  pred_cls=pred_cls,
-                #  target=targets,
-                #  anchors=scaled_anchors,
-                #  ignore_thres=yolo_layer.ignore_thres)
         tbox,tcls,nI,nA,nW,nH = build_targets(targets, scaled_anchors, grid_size)
         tconf = torch.zeros_like(pred_conf)
         tconf[nI,nA,nH,nW] = 1
-        #tcls = torch.zeros_like(pred_cls[nI,nA,nH,nW])
-        #tcls[:, tcls] =1
 
-        
-        #loss_x = model.mse_loss(x[obj_mask], tx[obj_mask])
-        #loss_y = model.mse_loss(y[obj_mask], ty[obj_mask])
-        #loss_w = model.mse_loss(w[obj_mask], tw[obj_mask])
-        #loss_h = model.mse_loss(h[obj_mask], th[obj_mask])
-        #loss_conf_obj = model.bce_loss(pred_conf[obj_mask], tconf[obj_mask])
-        #loss_conf_noobj = model.bce_loss(pred_conf[noobj_mask], tconf[noobj_mask])
-        #loss_conf = model.obj_scale * loss_conf_obj + model.noobj_scale * loss_conf_noobj
-        #loss_cls = model.bce_loss(pred_cls[obj_mask], tcls[obj_mask])
         loss_box = model.mse_loss(pred_box[nI, nA, nH, nW], tbox.t())
         loss_conf = model.bce_loss(pred_conf, tconf) 
         loss_cls = model.cross_loss(pred_cls[nI,nA,nH,nW], tcls)
         loss_ = 4*loss_box + loss_conf + loss_cls
 
-        #loss_x = model.mse_loss(x[nI,nA,nH,nW], target[2])
-        #loss_y = model.mse_loss(y[obj_mask], ty[obj_mask])
-        #loss_w = model.mse_loss(w[obj_mask], tw[obj_mask])
-        #loss_h = model.mse_loss(h[obj_mask], th[obj_mask])
-        #loss_conf_obj = model.bce_loss(pred_conf[obj_mask], tconf[obj_mask])
-        #loss_conf_noobj = model.bce_loss(pred_conf[noobj_mask], tconf[noobj_mask])
-        #loss_conf = model.obj_scale * loss_conf_obj + model.noobj_scale * loss_conf_noobj
-        #loss_cls = model.bce_loss(pred_cls[obj_mask], tcls[obj_mask])
-        #loss_ = loss_x + loss_y + loss_w + loss_h + loss_conf
         total_loss.append(loss_)
     return torch.stack(total_loss)
